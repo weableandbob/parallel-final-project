@@ -44,6 +44,20 @@ extern "C" {
         CLEAN_EXIT \
     }
 
+#define END_DFS(d) \
+    delete d; \
+    return NULL;
+
+/*#define COPY_STRUCT_FOR_LOCAL(orig, copy) \
+    copy->motif_index = orig->motif_index; \
+    copy->cur_node = g_local_nodes[next_node]; \
+    copy->desired_motif_node.motif_node_index = it->first; \
+    copy->desired_motif_node.role = copy->cur_node.role; \
+    copy->first_invocation = false; \
+    copy->motif_edges = orig->motif_edges; \
+    copy->visited_nodes = orig->visited_nodes; \
+    copy->motif_to_unique = orig->motif_to_unique;*/
+
 using namespace std;
 
 /***************************************************************************/
@@ -65,7 +79,7 @@ struct dfs_data {
     struct graph_node cur_node; //The graph node being visited on this dfs call
     struct motif_node desired_motif_node; //The motif node id and role that this node should match
     bool first_invocation; //Whether this is the first time DFS is being run
-    vector< pair<struct motif_node, struct motif_node> > motif_edges; //List of motif edges left to be evaluated
+    list< pair<struct motif_node, struct motif_node> > motif_edges; //List of motif edges left to be evaluated
     set<int> visited_nodes; //Set of all node numbers that have been visited in this path
     map<int, int> motif_to_unique; //Map of motif nodes to unique node IDs
 };
@@ -82,15 +96,63 @@ threadpool g_local_threads; //Searches that started in this rank
 
 //Graph related variables
 int g_ranks_done; //Counter used to keep track of how many nodes are done with the current motif since barriers are not an option
-vector< vector<pair<struct motif_node, struct motif_node> > > g_motifs; //A vector of motifs. Each motif is a vector of edges
+vector< list<pair<struct motif_node, struct motif_node> > > g_motifs; //A vector of motifs. Each motif is a list of edges
 map<int, struct graph_node> g_local_nodes; //A mapping of unique node identifiers to nodes that are stored in this rank
 vector<int> g_vtxdist; //Equivalent to vtxdist from ParMETIS. If vtxdist[i] <= node_id_j < vtxdist[i+1], then the node with unique id j is in rank i
                        //Ordered, so use a binary search
+vector<int> g_motif_counts; //Counts of each motif that were found to end in this local graph
 
 //Synchronization
 pthread_mutex_t* m_counter_lock;
 pthread_mutex_t* m_mpi_lock;
 //map<pthread_t, sem_t*> g_locked_threads;
+
+/***************************************************************************/
+/* printGraph **************************************************************/
+/***************************************************************************/
+void printGraph(){
+    for(map<int, struct graph_node>::iterator iter = g_local_nodes.begin();
+            iter != g_local_nodes.end(); iter++){
+        cout << "Node id " << iter->second.unique_id << " role " << iter->second.role << endl;
+        cout << "Neighbors: ";
+        for(set<int>::iterator n = iter->second.neighbors.begin(); 
+                n != iter->second.neighbors.end(); n++){
+            cout << *n << " ";
+        }
+        cout << endl;
+    }
+}
+
+/***************************************************************************/
+/* getRankForNode **********************************************************/
+/***************************************************************************/
+//Returns the MPI rank storing the node with the given unique id using a binary search
+int getRankForNode(int id){
+    if(g_vtxdist[g_vtxdist.size() - 1] <= id){
+        cerr << "Requested to find a node not in the graph" << endl;
+        CLEAN_EXIT
+    }
+
+    int left = 0;
+    int right = g_vtxdist.size() - 2;
+    int m;
+    while(true){
+        //Don't need to check if left > right since the format of vtxdist guarantees a node will be inside
+        m = (left + right) / 2;
+        if(m == (int)(g_vtxdist.size() - 1)){
+            m -= 1;
+        }
+        if(g_vtxdist[m] <= id && g_vtxdist[m+1] > id){
+            return m;
+        }
+        else if(g_vtxdist[m] <= id){
+            left = m + 1;
+        }
+        else{
+            right = m - 1;
+        }
+    }
+}
 
 /***************************************************************************/
 /* isValidMotif ************************************************************/
@@ -112,6 +174,7 @@ pthread_mutex_t* m_mpi_lock;
         return true
 */
 bool isValidMotif(dfs_data* data){
+    (void)data;
     return true;
 }
 
@@ -119,6 +182,7 @@ bool isValidMotif(dfs_data* data){
 /* threadDFS ***************************************************************/
 /***************************************************************************/
 //Depth first search meant to be started in a separate thread
+//The function is responsible for deleting any data it is given
 /*Pseudocode:
     if current node's role != desired role: (only want to visit nodes of the correct role)
         return
@@ -166,22 +230,170 @@ void* threadDFS(void* d){
     struct dfs_data* data = (struct dfs_data*)d;
 
     //Test code
-    cout << "Rank " << mpi_myrank << " DFS run on motif " << data->motif_index << " graph node role " << data->cur_node.unique_id;
+    cout << "Rank " << mpi_myrank << " DFS run on motif " << data->motif_index << " graph node " << data->cur_node.unique_id;
     cout << " desired motif node role " << data->desired_motif_node.motif_node_index << " motif edges ";
-    for(unsigned int i = 0; i < data->motif_edges.size(); i++){
-        cout << "([" << data->motif_edges[i].first.motif_node_index << ", ";
-        cout << data->motif_edges[i].first.role << "], [" << data->motif_edges[i].second.motif_node_index;
-        cout << ", " << data->motif_edges[i].second.role << "]) ";
+    for(list<pair<struct motif_node, struct motif_node> >::iterator i = data->motif_edges.begin();
+            i != data->motif_edges.end(); i++){
+        cout << "([" << i->first.motif_node_index << ", ";
+        cout << i->first.role << "], [" << i->second.motif_node_index;
+        cout << ", " << i->second.role << "]) ";
     }
     cout << endl;
     //End test code
 
+    //Ensure we're at a valid node for the motif
     //Current node and desired motif node role mismatch
     if(data->cur_node.role != data->desired_motif_node.role){
-        return NULL;
+        cout << "mismatched role" << endl;
+        END_DFS(data)
+    }
+    //Current node is unvisited
+    if(data->visited_nodes.find(data->cur_node.unique_id) == data->visited_nodes.end()){
+        data->visited_nodes.insert(data->cur_node.unique_id);
+        data->motif_to_unique[data->desired_motif_node.motif_node_index] = data->cur_node.unique_id;
+    }
+    //Check whether the node's motif id is the same as the desired id
+    if(data->motif_to_unique[data->desired_motif_node.motif_node_index] != data->cur_node.unique_id){
+        cout << "mismatch id" << endl;
+        END_DFS(data)
     }
 
-    return NULL;
+    cout << "valid node" << endl;
+    //Now know that the node we're at is valid
+    //Check if this was the last node needed to complete motif
+    if(data->motif_edges.empty()){
+        if(isValidMotif(data)){
+            pthread_mutex_lock(m_counter_lock);
+            g_motif_counts[data->motif_index] = g_motif_counts[data->motif_index] + 1;
+            pthread_mutex_unlock(m_counter_lock);
+        }
+        END_DFS(data);
+    }
+
+    //Check whether the next edge starts at this node or not
+    int source_motif_node = data->motif_edges.front().first.motif_node_index;
+    map<int, int>::iterator it = data->motif_to_unique.find(source_motif_node);
+    //Does not support motifs that have more than node that cannot be reached by any other node
+    //E.g. 0 -> 1 <- 2 is invalid since 0 and 2 cannot be reached unless starting the search at them
+    if(it == data->motif_to_unique.end()){
+        cerr << "Was given a motif that is not supported by this motif representation format" << endl;
+        CLEAN_EXIT
+    }
+
+    cout << "valid motif representation" << endl;
+    //next_node is a unique node identifier
+    int source_unique_node = it->second;
+    int rank_with_node;
+    //Need to hop to previously visited node before continuing
+    if(source_unique_node != data->cur_node.unique_id){
+        //Determine if the visited node is in this rank or not
+        rank_with_node = getRankForNode(source_unique_node);
+        //Node is local, so simply jump
+        if(rank_with_node == mpi_myrank){
+            cout << "jumping" << endl;
+            struct dfs_data* input = new dfs_data;
+            //Copy data into new struct to pass to new invocation of threadDFS
+            input->motif_index = data->motif_index;
+            input->cur_node = g_local_nodes[source_unique_node];
+            //Jumping, so the motif_node_index should be the same as the previously visited node
+            input->desired_motif_node.motif_node_index = it->first;
+            //Role should be the same as the previously visited node, as well
+            input->desired_motif_node.role = input->cur_node.role;
+            input->first_invocation = false;
+            input->motif_edges = data->motif_edges;
+            input->visited_nodes = data->visited_nodes;
+            input->motif_to_unique = data->motif_to_unique;
+
+            threadDFS((void*)input);
+            END_DFS(data)
+        }
+        //Node is in another rank, so send data to that rank and continue
+        else{
+
+        }
+    }
+
+    cout << "continues from current node" << endl;
+    //Otherwise continues from this node
+    pair<struct motif_node, struct motif_node> next_edge = data->motif_edges.front();
+    //Pop the edge so we don't keep calling dfs on the same edge
+    data->motif_edges.pop_front();
+
+    //Determine if we have visited the next node before
+    int dest_motif_node = next_edge.second.motif_node_index;
+    it = data->motif_to_unique.find(dest_motif_node);
+
+    //The next node was previously visited
+    if(it != data->motif_to_unique.end()){
+        int dest_unique_node = it->second;
+        //If the node is not a neighbor, know we can immediately return
+        if(data->cur_node.neighbors.find(dest_unique_node) == data->cur_node.neighbors.end()){
+            cout << "previously visited node not neighbor" << endl;
+            END_DFS(data)
+        }
+        //Determine if the visited node is in this rank or not
+        rank_with_node = getRankForNode(dest_unique_node);
+        //Node is local, so simply call from same thread
+        if(rank_with_node == mpi_myrank){
+            cout << "previously visited" << endl;
+            struct dfs_data* input = new dfs_data;
+            //Copy data into new struct to pass to new invocation of threadDFS
+            input->motif_index = data->motif_index;
+            input->cur_node = g_local_nodes[dest_unique_node];
+            //Going to a previously visited node, so motif_node_index and role should match
+            //every time
+            input->desired_motif_node.motif_node_index = next_edge.second.motif_node_index;
+            input->desired_motif_node.role = next_edge.second.role;
+            input->first_invocation = false;
+            input->motif_edges = data->motif_edges;
+            input->visited_nodes = data->visited_nodes;
+            input->motif_to_unique = data->motif_to_unique;
+
+            threadDFS((void*)input);
+            END_DFS(data)
+        }
+        //Node is in another rank
+        else{
+
+        }
+    }
+
+    cout << "going to new node" << endl;
+    //Know that edge goes to a new node, so iterate over all neighbors
+    for(set<int>::iterator neigh = data->cur_node.neighbors.begin();
+            neigh != data->cur_node.neighbors.end(); neigh++){
+        //Don't need to try any visited nodes
+        if(data->visited_nodes.find(*neigh) != data->visited_nodes.end()){
+            continue;
+        }
+
+        //Determine if the neighbor is in this rank or not
+        cout << "before search" << endl;
+        rank_with_node = getRankForNode(*neigh);
+        cout << "after search" << endl;
+        //Node is local, so simply run from current thread
+        if(rank_with_node == mpi_myrank){
+            cout << "new node" << endl;
+            struct dfs_data* input = new dfs_data;
+            input->motif_index = data->motif_index;
+            input->cur_node = g_local_nodes[*neigh];
+            input->desired_motif_node.motif_node_index = next_edge.second.motif_node_index;
+            input->desired_motif_node.role = next_edge.second.role;
+            input->first_invocation = false;
+            input->motif_edges = data->motif_edges;
+            input->visited_nodes = data->visited_nodes;
+            input->motif_to_unique = data->motif_to_unique;
+
+            threadDFS((void*)input);
+        }
+        //Node is in another rank
+        else{
+
+        }
+    }
+
+    cout << "got to end" << endl;
+    END_DFS(data)
 }
 
 /***************************************************************************/
@@ -197,11 +409,11 @@ void* threadDispatcher(void* motif_index){
         data->cur_node = it->second;
         data->first_invocation = true;
         data->motif_edges = g_motifs[data->motif_index];
-        data->desired_motif_node = data->motif_edges[0].first;
+        data->desired_motif_node = data->motif_edges.front().first;
 
         thpool_add_work(g_local_threads, threadDFS, (void*)data);
         //Test code
-        sleep((mpi_myrank+1) * 3);
+        //sleep((mpi_myrank+1) * 1);
         //End test code
     }
     //Wait for all locally dispatched threads to finish
@@ -256,33 +468,144 @@ int main(int argc, char* argv[]){
     CHECK_MUTEX_INIT(rc)
 
     //Test code: create dummy graph
-    for(int i = 0; i < 2; i++){
-        struct graph_node v;
-        v.unique_id = i;
-        v.role = 0;
-        for(int j = 0; j < 2; j++){
-            if(i == j){
-                continue;
-            }
-            v.neighbors.insert(j);
-        }
-        g_local_nodes[i] = v;
-    }
+    //Single rank test
+    struct graph_node v;
+    v.role = 0;
+    v.unique_id = 0;
+    g_local_nodes[0] = v;
+    v.unique_id = 1;
+    g_local_nodes[1] = v;
+    v.unique_id = 2;
+    v.neighbors.insert(0);
+    v.neighbors.insert(1);
+    g_local_nodes[2] = v;
+    v.neighbors.clear();
+    v.unique_id = 3;
+    v.neighbors.insert(2);
+    v.neighbors.insert(4);
+    v.neighbors.insert(7);
+    g_local_nodes[3] = v;
+    v.neighbors.clear();
+    v.unique_id = 4;
+    v.neighbors.insert(5);
+    v.neighbors.insert(6);
+    g_local_nodes[4] = v;
+    v.neighbors.clear();
+    v.unique_id = 5;
+    g_local_nodes[5] = v;
+    v.unique_id = 6;
+    g_local_nodes[6] = v;
+    v.unique_id = 7;
+    v.neighbors.insert(8);
+    v.neighbors.insert(9);
+    g_local_nodes[7] = v;
+    v.neighbors.clear();
+    v.unique_id = 8;
+    v.neighbors.insert(9);
+    g_local_nodes[8] = v;
+    v.neighbors.clear();
+    v.unique_id = 9;
+    v.neighbors.insert(10);
+    v.neighbors.insert(11);
+    g_local_nodes[9] = v;
+    v.neighbors.clear();
+    v.unique_id = 10;
+    v.neighbors.insert(11);
+    g_local_nodes[10] = v;
+    v.neighbors.clear();
+    v.unique_id = 11;
+    v.neighbors.insert(3);
+    v.neighbors.insert(12);
+    g_local_nodes[11] = v;
+    v.neighbors.clear();
+    v.unique_id = 12;
+    v.neighbors.insert(13);
+    v.neighbors.insert(15);
+    g_local_nodes[12] = v;
+    v.neighbors.clear();
+    v.unique_id = 13;
+    v.neighbors.insert(14);
+    g_local_nodes[13] = v;
+    v.neighbors.clear();
+    v.unique_id = 14;
+    g_local_nodes[14] = v;
+    v.unique_id = 15;
+    v.neighbors.insert(14);
+    g_local_nodes[15] = v;
+
+    g_vtxdist.push_back(0);
+    g_vtxdist.push_back(16);
     //End test code
 
     //Test code: create dummy motifs
-    for(unsigned int i = 0; i < 2; i++){
-        vector< pair<struct motif_node, struct motif_node> > motif;
-        for(unsigned int j = 0; j < 2; j++){
-            struct motif_node a;
-            a.motif_node_index = i;
-            a.role = 0;
-            struct motif_node b;
-            b.motif_node_index = j;
-            b.role = 0;
-            motif.push_back(make_pair(a, b));
-        }
-        g_motifs.push_back(motif);
+    //Single rank test
+    list<pair<struct motif_node, struct motif_node> > m;
+    struct motif_node a;
+    a.role = 0;
+    struct motif_node b;
+    b.role = 0;
+    //Motif 0
+    a.motif_node_index = 0;
+    b.motif_node_index = 1;
+    m.push_back(make_pair(a, b));
+    b.motif_node_index = 2;
+    m.push_back(make_pair(a, b));
+    a.motif_node_index = 1;
+    m.push_back(make_pair(a, b));
+    g_motifs.push_back(m);
+    m.clear();
+    //Motif 1
+    for(int i = 0; i < 4; i++){
+        a.motif_node_index = i;
+        b.motif_node_index = (i + 1) % 4;
+        m.push_back(make_pair(a, b));
+    }
+    g_motifs.push_back(m);
+    m.clear();
+    //Motif 2
+    for(int i = 0; i < 5; i++){
+        a.motif_node_index = i;
+        b.motif_node_index = (i + 1) % 5;
+        m.push_back(make_pair(a, b));
+    }
+    g_motifs.push_back(m);
+    m.clear();
+    //Motif 3
+    a.motif_node_index = 0;
+    b.motif_node_index = 1;
+    m.push_back(make_pair(a, b));
+    a.motif_node_index = 1;
+    b.motif_node_index = 2;
+    m.push_back(make_pair(a, b));
+    b.motif_node_index = 3;
+    m.push_back(make_pair(a, b));
+    g_motifs.push_back(m);
+    m.clear();
+    //Motif 4
+    a.motif_node_index = 0;
+    b.motif_node_index = 1;
+    m.push_back(make_pair(a, b));
+    a.motif_node_index = 1;
+    b.motif_node_index = 2;
+    m.push_back(make_pair(a, b));
+    b.motif_node_index = 3;
+    m.push_back(make_pair(a, b));
+    a.motif_node_index = 2;
+    b.motif_node_index = 4;
+    m.push_back(make_pair(a, b));
+    a.motif_node_index = 3;
+    m.push_back(make_pair(a, b));
+    g_motifs.push_back(m);
+    m.clear();
+    //Motif 5
+    a.motif_node_index = 0;
+    b.motif_node_index = 1;
+    m.push_back(make_pair(a, b));
+    m.push_back(make_pair(b, a));
+    g_motifs.push_back(m);
+
+    for(unsigned int i = 0; i < g_motifs.size(); i++){
+        g_motif_counts.push_back(0);
     }
     //End test code
 
@@ -357,6 +680,9 @@ int main(int argc, char* argv[]){
 
     MPI_Barrier(MPI_COMM_WORLD);
     rc = MPI_Finalize();
+    for(unsigned int i = 0; i < g_motif_counts.size(); i++){
+        cout << "Count for motif " << i << ": " << g_motif_counts[i] << endl;
+    }
     return 0;
 
     //Begin test code
