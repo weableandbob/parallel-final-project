@@ -237,7 +237,53 @@ void getNodeFromRank(int node_id, int rank, map<int, struct graph_node> &cache){
         return true
 */
 bool isValidMotif(dfs_data* data){
-    (void)data;
+    //Need a fresh copy of motif edges
+    data->motif_edges = g_motifs[data->motif_index];
+
+    //Go through each of the visited nodes
+    for(map<int, int>::iterator m_to_u_iter = data->motif_to_unique.begin();
+            m_to_u_iter != data->motif_to_unique.end(); m_to_u_iter++){
+        int cur_node_m_id = m_to_u_iter->first;
+        struct graph_node cur_node;
+        map<int, struct graph_node>::iterator node_iter = g_local_nodes.find(m_to_u_iter->second);
+        //Remote node
+        if(node_iter == g_local_nodes.end()){
+            cur_node = data->remote_cache[m_to_u_iter->second];
+        }
+        //Local node
+        else{
+            cur_node = node_iter->second;
+        }
+        set<int> neighbors_in_motif;
+
+        //Get all the nodes in the motif that this node has a motif edge to
+        for(list<pair<struct motif_node, struct motif_node> >::iterator edge_iter = data->motif_edges.begin();
+                edge_iter != data->motif_edges.end(); edge_iter++){
+            if(edge_iter->first.motif_node_index != cur_node_m_id){
+                continue;
+            }
+            neighbors_in_motif.insert(data->motif_to_unique[edge_iter->second.motif_node_index]);
+        }
+
+        //See if there are any non-motif edges between this node and motif neighbors
+        set<int>::iterator neighbor_iter;
+        for(set<int>::iterator visited_iter = data->visited_nodes.begin();
+                visited_iter != data->visited_nodes.end(); visited_iter++){
+
+            neighbor_iter = cur_node.neighbors.find(*visited_iter);
+            //The visited node is not a neighbor of the node in question
+            if(neighbor_iter == cur_node.neighbors.end()){
+                continue;
+            }
+
+            //We know that there exists an edge between the node in question and the visited node
+            //If there isn't an edge between the two in the motif, this is not a valid motif
+            neighbor_iter = neighbors_in_motif.find(*visited_iter);
+            if(neighbor_iter == neighbors_in_motif.end()){
+                return false;
+            }
+        }
+    }
     return true;
 }
 
@@ -328,7 +374,7 @@ void* threadDFS(void* d){
     if(data->motif_edges.empty()){
         if(isValidMotif(data)){
             pthread_mutex_lock(m_counter_lock);
-            g_motif_counts[data->motif_index] = g_motif_counts[data->motif_index] + 1;
+            g_motif_counts[data->motif_index] += 1;
             pthread_mutex_unlock(m_counter_lock);
         }
         END_DFS(data);
