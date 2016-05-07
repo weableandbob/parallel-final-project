@@ -656,7 +656,7 @@ int main(int argc, char* argv[]){
     CHECK_MUTEX_INIT(rc)
     cout<<"test read"<<endl;
     genTestData();
-    MPI_Barrier(MPI_COMM_WORLD);
+    //MPI_Barrier(MPI_COMM_WORLD);
     sleep(mpi_myrank * 2);
     printStartInfo();
     MPI_Barrier(MPI_COMM_WORLD);
@@ -666,6 +666,7 @@ int main(int argc, char* argv[]){
     int flag;
     int* motif_index = new int;
     for(unsigned int i = 0; i < g_motifs.size(); i++){
+	cout<<"at motif 1"<<endl;
         g_ranks_done = 0;
 
         //Create dispatcher thread for the motif
@@ -848,7 +849,8 @@ int main(int argc, char* argv[]){
         for(unsigned int i = 0; i < g_motif_counts.size(); i++){
             cout << "Count for motif " << i << ": " << g_motif_counts[i] << endl;
         }
-    }    
+	cout<<"done"<<endl;    
+	}    
     return 0;
 }
 
@@ -897,28 +899,45 @@ if(mpi_myrank==0){
             g_vtxdist.push_back(i);
         }
     }
+/*
 	cout<<"vdist aray\n";
 	for(int i=0;i<g_vtxdist.size();i++){
 		printf(" %d ",g_vtxdist[i]);
 
 	}
-	cout<<endl;
+	cout<<endl;*/
 //////barier after transmission of vdist size
     MPI_Barrier(MPI_COMM_WORLD);
     int desRank;
     int edgeVal[2]; 
     MPI_Request req = MPI_REQUEST_NULL;
     MPI_Status status;
+    std::map<int,struct graph_node>::iterator it;
+    struct graph_node v;
+    v.role = 0;
     while (myfile >> edgeVal[0] >> edgeVal[1])
     {
 	
         
 	
 	desRank=getRankForNode(edgeVal[0]);
-	printf("edge %d to %d  destination rank %d \n", edgeVal[0] ,edgeVal[1],desRank);
-	MPI_Isend(&edgeVal, 2, MPI_INT, desRank, 0, MPI_COMM_WORLD, &req);
-	MPI_Wait(&req, &status);
-    }
+	//printf("edge %d to %d  destination rank %d \n", edgeVal[0] ,edgeVal[1],desRank);
+	if(desRank!=0){
+	    MPI_Isend(&edgeVal, 2, MPI_INT, desRank, 0, MPI_COMM_WORLD, &req);
+	    MPI_Wait(&req, &status);
+	}else{
+            it=g_local_nodes.find(edgeVal[0]);
+	        if(it==g_local_nodes.end()){
+		    v.neighbors.clear();
+		    v.unique_id = edgeVal[0];
+    		    v.neighbors.insert(edgeVal[1]);
+		    g_local_nodes[edgeVal[0]]=v;
+	     }else{
+		    it->second.neighbors.insert(edgeVal[1]);
+
+		}
+        }    
+	}
 	//indicate that the edges have been read
     edgeVal[0]=-1;
     edgeVal[1]=-1;
