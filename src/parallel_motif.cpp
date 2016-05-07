@@ -12,7 +12,7 @@ extern "C" {
     #include "C-Thread-Pool/thpool.h"
     #include <semaphore.h>
 }
-#include <parmetis.h>
+
 #include <iostream>
 #include <fstream>
 #include <cstdlib>
