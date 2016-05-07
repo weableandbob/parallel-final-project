@@ -30,6 +30,10 @@ extern "C" {
 #define MPIT_RANK_DONE 0
 #define MPIT_REQUEST_NODE 1
 #define MPIT_RESPONSE_NODE 2
+#define MPIT_EDGE_START 3
+#define MPIT_EDGE_END 4
+
+#define CLOCKRATE 1600000000
 
 //Macros
 #define CLEANUP_TP \
@@ -127,6 +131,12 @@ pthread_mutex_t* m_locked_threads;
 map<pthread_t, sem_t*> g_locked_threads;
 map<pthread_t, struct graph_node*> g_shared_buffers; //Used to pass received nodes to threads
                                                      //Thread is responsible for freeing memory
+
+//Timing
+unsigned long long g_gen_time_start = 0;
+unsigned long long g_gen_time_end = 0;
+unsigned long long g_comp_time_start = 0;
+unsigned long long g_comp_time_end = 0;
 
 /***************************************************************************/
 /* printGraph **************************************************************/
@@ -657,12 +667,22 @@ int main(int argc, char* argv[]){
     m_locked_threads = new pthread_mutex_t;
     rc = pthread_mutex_init(m_locked_threads, NULL);
     CHECK_MUTEX_INIT(rc)
-    //cout<<"test read"<<endl;
+
+    if(mpi_myrank == 0){
+        g_gen_time_start = GetTimeBase();
+    }
     genTestData();
     MPI_Barrier(MPI_COMM_WORLD);
+    if(mpi_myrank == 0){
+        g_gen_time_end = GetTimeBase();
+    }
     sleep(mpi_myrank * 2);
     printStartInfo();
     MPI_Barrier(MPI_COMM_WORLD);
+
+    if(mpi_myrank == 0){
+        g_comp_time_start = GetTimeBase();
+    }
 
     //Search for all motifs
     MPI_Status status;
@@ -846,13 +866,18 @@ int main(int argc, char* argv[]){
     delete motif_index;
     CLEANUP_TP
 
+    if(mpi_myrank == 0){
+        g_comp_time_end = GetTimeBase();
+    }
+
     MPI_Barrier(MPI_COMM_WORLD);
     rc = MPI_Finalize();
     if(mpi_myrank == 0){
         for(unsigned int i = 0; i < g_motif_counts.size(); i++){
             cout << "Count for motif " << i << ": " << g_motif_counts[i] << endl;
         }
-    //cout<<"done"<<endl;    
+        cout << "Graph distribution time took " << (g_gen_time_end - g_gen_time_start) / ((double)CLOCKRATE) << " seconds" << endl;
+        cout << "Computation time took " << (g_comp_time_end - g_comp_time_start) / ((double)CLOCKRATE) << " seconds" << endl;
     }    
     return 0;
 }
@@ -862,27 +887,6 @@ int main(int argc, char* argv[]){
 /***************************************************************************/
 
 void genTestData(){
-    /*
-    
-    int mpi_myrank;
-    int mpi_commsize;
-    
-    //Threadpools
-    threadpool g_local_threads; //Searches that started in this rank
-    
-    //Graph related variables
-    int g_ranks_done; //Counter used to keep track of how many nodes are done with the current motif since barriers are not an option
-    vector< list<pair<struct motif_node, struct motif_node> > > g_motifs; //A vector of motifs. Each motif is a list of edges
-    map<int, struct graph_node> g_local_nodes; //A mapping of unique node identifiers to nodes that are stored in this rank
-    vector<int> g_vtxdist; //Equivalent to vtxdist from ParMETIS. If vtxdist[i] <= node_id_j < vtxdist[i+1], then the node with unique id j is in rank i
-                           //Ordered, so use a binary search
-    vector<int> g_motif_counts; //Counts of each motif that were found to end in this local graph
-    
-      
-    
-    */
-          //Test code: create dummy graph
-        //Single rank test
     int totalNodes, nodesPerRank;
     if(mpi_myrank==0){
        
@@ -892,9 +896,11 @@ void genTestData(){
         //read in totalnumber of nodes
         myfile>>totalNodes;
         
+        //Let every rank know total number of nodes
         MPI_Bcast(&totalNodes,1,MPI_INT,0, MPI_COMM_WORLD);
         nodesPerRank=totalNodes/mpi_commsize;
-        //g_vtxdist.push_back(0);
+
+        //Generate vtxdist
         for(int i = 0; i <= totalNodes; i += nodesPerRank){
             if(i+nodesPerRank>totalNodes){
                 g_vtxdist.push_back(totalNodes);
@@ -903,15 +909,9 @@ void genTestData(){
                 g_vtxdist.push_back(i);
             }
         }
-    /*
-        cout<<"vdist aray\n";
-        for(int i=0;i<g_vtxdist.size();i++){
-            printf(" %d ",g_vtxdist[i]);
-    
-        }
-        cout<<endl;*/
-        //////barier after transmission of vdist size
+
         MPI_Barrier(MPI_COMM_WORLD);
+
         int desRank;
         int edgeVal[2]; 
         MPI_Request req = MPI_REQUEST_NULL;
@@ -922,24 +922,39 @@ void genTestData(){
     
         while (myfile >> edgeVal[0] >> edgeVal[1]){
         
-           desRank=getRankForNode(edgeVal[0]);
-           //printf("edge %d to %d  destination rank %d \n", edgeVal[0] ,edgeVal[1],desRank);
-           if(desRank!=0){
-               MPI_Isend(&edgeVal, 2, MPI_INT, desRank, 0, MPI_COMM_WORLD, &req);
-               MPI_Wait(&req, &status);
-           }
-           else{
-                it=g_local_nodes.find(edgeVal[0]);
-                if(it==g_local_nodes.end()){
+            //Add the source node
+            desRank = getRankForNode(edgeVal[0]);
+            if(desRank != 0){
+                MPI_Isend(&edgeVal, 2, MPI_INT, desRank, MPIT_EDGE_START, MPI_COMM_WORLD, &req);
+                MPI_Wait(&req, &status);
+            }
+            else{
+                it = g_local_nodes.find(edgeVal[0]);
+                if(it == g_local_nodes.end()){
                     v.neighbors.clear();
                     v.unique_id = edgeVal[0];
                     v.neighbors.insert(edgeVal[1]);
-                    g_local_nodes[edgeVal[0]]=v;
+                    g_local_nodes[edgeVal[0]] = v;
                 }
                 else{
                     it->second.neighbors.insert(edgeVal[1]);
                 }
-            }    
+            }
+
+            //Add the destination node. Necessary in case of sink nodes
+            desRank = getRankForNode(edgeVal[1]);
+            if(desRank != 0){
+                MPI_Isend(&edgeVal, 2, MPI_INT, desRank, MPIT_EDGE_END, MPI_COMM_WORLD, &req);
+                MPI_Wait(&req, &status);
+            }
+            else{
+                it = g_local_nodes.find(edgeVal[1]);
+                if(it == g_local_nodes.end()){
+                    v.neighbors.clear();
+                    v.unique_id = edgeVal[1];
+                    g_local_nodes[edgeVal[1]] = v;
+                }
+            }
         }
     
         myfile.close();
@@ -947,16 +962,17 @@ void genTestData(){
         edgeVal[0]=-1;
         edgeVal[1]=-1;
         for(int i=1;i<mpi_commsize;i++){
-            MPI_Isend(&edgeVal, 2, MPI_INT, i, 0, MPI_COMM_WORLD, &req);
+            MPI_Isend(&edgeVal, 2, MPI_INT, i, MPIT_EDGE_START, MPI_COMM_WORLD, &req);
             MPI_Wait(&req, &status);
         }
     }
     else{    
-    //recieve total number of nodes and generate vtxdist
+        //recieve total number of nodes and generate vtxdist
         MPI_Bcast(&totalNodes,1,MPI_INT,0, MPI_COMM_WORLD);
     
         nodesPerRank=totalNodes/mpi_commsize;
         
+        //Generate vtxdist
         for(int i = 0; i <= totalNodes; i += nodesPerRank){
             if(i+nodesPerRank>totalNodes){
                 g_vtxdist.push_back(totalNodes);
@@ -967,6 +983,7 @@ void genTestData(){
         }
     
         MPI_Barrier(MPI_COMM_WORLD);
+
         std::map<int,struct graph_node>::iterator it;
         int edgeVal[2];
         edgeVal[0]=0;
@@ -976,19 +993,29 @@ void genTestData(){
         struct graph_node v;
         v.role = 0;
        
-        while(edgeVal[0]!=-1){
-            MPI_Irecv(&edgeVal, 2, MPI_INT, 0, 0, MPI_COMM_WORLD,&req);
+        while(edgeVal[0] != -1){
+            MPI_Irecv(&edgeVal, 2, MPI_INT, 0, MPI_ANY_TAG, MPI_COMM_WORLD,&req);
             MPI_Wait(&req, &status);
-            if(edgeVal[0]!=-1){
-                it=g_local_nodes.find(edgeVal[0]);
-                if(it==g_local_nodes.end()){
-                    v.neighbors.clear();
-                    v.unique_id = edgeVal[0];
-                    v.neighbors.insert(edgeVal[1]);
-                    g_local_nodes[edgeVal[0]]=v;
+            if(status.MPI_TAG == MPIT_EDGE_START){
+                if(edgeVal[0] != -1){
+                    it=g_local_nodes.find(edgeVal[0]);
+                    if(it==g_local_nodes.end()){
+                        v.neighbors.clear();
+                        v.unique_id = edgeVal[0];
+                        v.neighbors.insert(edgeVal[1]);
+                        g_local_nodes[edgeVal[0]]=v;
+                    }
+                    else{
+                        it->second.neighbors.insert(edgeVal[1]);
+                    }
                 }
-                else{
-                    it->second.neighbors.insert(edgeVal[1]);
+            }
+            else{
+                it = g_local_nodes.find(edgeVal[1]);
+                if(it == g_local_nodes.end()){
+                    v.neighbors.clear();
+                    v.unique_id = edgeVal[1];
+                    g_local_nodes[edgeVal[1]] = v;
                 }
             }
         }
