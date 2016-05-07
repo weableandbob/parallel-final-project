@@ -656,6 +656,7 @@ int main(int argc, char* argv[]){
     CHECK_MUTEX_INIT(rc)
     cout<<"test read"<<endl;
     genTestData();
+    MPI_Barrier(MPI_COMM_WORLD);
     sleep(mpi_myrank * 2);
     printStartInfo();
     MPI_Barrier(MPI_COMM_WORLD);
@@ -888,7 +889,7 @@ if(mpi_myrank==0){
     
     MPI_Bcast(&totalNodes,1,MPI_INT,0, MPI_COMM_WORLD);
     nodesPerRank=totalNodes/mpi_commsize;
-    
+    //g_vtxdist.push_back(0);
     for(int i = 0; i <= totalNodes; i += nodesPerRank){
         if(i+nodesPerRank>totalNodes){
 	    g_vtxdist.push_back(totalNodes);
@@ -896,6 +897,13 @@ if(mpi_myrank==0){
             g_vtxdist.push_back(i);
         }
     }
+	cout<<"vdist aray\n";
+	for(int i=0;i<g_vtxdist.size();i++){
+		printf(" %d ",g_vtxdist[i]);
+
+	}
+	cout<<endl;
+//////barier after transmission of vdist size
     MPI_Barrier(MPI_COMM_WORLD);
     int desRank;
     int edgeVal[2]; 
@@ -904,9 +912,10 @@ if(mpi_myrank==0){
     while (myfile >> edgeVal[0] >> edgeVal[1])
     {
 	
-        printf("edge %d to %d \n", edgeVal[0] ,edgeVal[1]);
+        
 	
 	desRank=getRankForNode(edgeVal[0]);
+	printf("edge %d to %d  destination rank %d \n", edgeVal[0] ,edgeVal[1],desRank);
 	MPI_Isend(&edgeVal, 2, MPI_INT, desRank, 0, MPI_COMM_WORLD, &req);
 	MPI_Wait(&req, &status);
     }
