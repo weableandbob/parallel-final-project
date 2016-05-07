@@ -12,7 +12,9 @@ extern "C" {
     #include "C-Thread-Pool/thpool.h"
     #include <semaphore.h>
 }
+#include <parmetis.h>
 #include <iostream>
+#include <fstream>
 #include <cstdlib>
 #include <cstring>
 #include <unistd.h>
@@ -21,7 +23,7 @@ extern "C" {
 #include <set>
 #include <utility>
 #include <list>
-
+#include <string>
 #include <mpi.h> //MPI apparently does the extern stuff in its header file
 
 //MPI tags
@@ -100,6 +102,7 @@ struct node_response { //struct sent over MPI responding to a request for node d
 /***************************************************************************/
 /* Global Variables ********************************************************/
 /***************************************************************************/
+string dataFile;
 //MPI globals
 int mpi_myrank;
 int mpi_commsize;
@@ -634,7 +637,7 @@ int main(int argc, char* argv[]){
         exit(EXIT_FAILURE);
     }
     int num_local_threads = atoi(argv[3]);
-
+    dataFile=string(argv[1]);
     //Initialize thread pools
     g_local_threads = thpool_init(num_local_threads);
 
@@ -651,7 +654,7 @@ int main(int argc, char* argv[]){
     m_locked_threads = new pthread_mutex_t;
     rc = pthread_mutex_init(m_locked_threads, NULL);
     CHECK_MUTEX_INIT(rc)
-
+    cout<<"test read"<<endl;
     genTestData();
     sleep(mpi_myrank * 2);
     printStartInfo();
@@ -853,84 +856,122 @@ int main(int argc, char* argv[]){
 /***************************************************************************/
 
 void genTestData(){
-        //Test code: create dummy graph
-    //Single rank test
-    struct graph_node v;
-    v.role = 0;
-    v.unique_id = 0;
-    g_local_nodes[0] = v;
-    v.unique_id = 1;
-    g_local_nodes[1] = v;
-    v.unique_id = 2;
-    v.neighbors.insert(0);
-    v.neighbors.insert(1);
-    g_local_nodes[2] = v;
-    v.neighbors.clear();
-    v.unique_id = 3;
-    v.neighbors.insert(2);
-    v.neighbors.insert(4);
-    v.neighbors.insert(7);
-    g_local_nodes[3] = v;
-    v.neighbors.clear();
-    v.unique_id = 4;
-    v.neighbors.insert(5);
-    v.neighbors.insert(6);
-    g_local_nodes[4] = v;
-    v.neighbors.clear();
-    v.unique_id = 5;
-    g_local_nodes[5] = v;
-    v.unique_id = 6;
-    g_local_nodes[6] = v;
-    v.unique_id = 7;
-    v.neighbors.insert(8);
-    v.neighbors.insert(9);
-    g_local_nodes[7] = v;
-    v.neighbors.clear();
-    v.unique_id = 8;
-    v.neighbors.insert(9);
-    g_local_nodes[8] = v;
-    v.neighbors.clear();
-    v.unique_id = 9;
-    v.neighbors.insert(10);
-    v.neighbors.insert(11);
-    g_local_nodes[9] = v;
-    v.neighbors.clear();
-    v.unique_id = 10;
-    v.neighbors.insert(11);
-    g_local_nodes[10] = v;
-    v.neighbors.clear();
-    v.unique_id = 11;
-    v.neighbors.insert(3);
-    v.neighbors.insert(12);
-    g_local_nodes[11] = v;
-    v.neighbors.clear();
-    v.unique_id = 12;
-    v.neighbors.insert(13);
-    v.neighbors.insert(15);
-    g_local_nodes[12] = v;
-    v.neighbors.clear();
-    v.unique_id = 13;
-    v.neighbors.insert(14);
-    g_local_nodes[13] = v;
-    v.neighbors.clear();
-    v.unique_id = 14;
-    g_local_nodes[14] = v;
-    v.unique_id = 15;
-    v.neighbors.insert(14);
-    g_local_nodes[15] = v;
+/*
 
-    //Remove non-local nodes for multiple ranks
-    int nodes_per_rank = 16 / mpi_commsize;
-    for(int i = 0; i < 16; i++){
-        if(i < nodes_per_rank * mpi_myrank || i >= nodes_per_rank * (mpi_myrank + 1)){
-            g_local_nodes.erase(i);
+int mpi_myrank;
+int mpi_commsize;
+
+//Threadpools
+threadpool g_local_threads; //Searches that started in this rank
+
+//Graph related variables
+int g_ranks_done; //Counter used to keep track of how many nodes are done with the current motif since barriers are not an option
+vector< list<pair<struct motif_node, struct motif_node> > > g_motifs; //A vector of motifs. Each motif is a list of edges
+map<int, struct graph_node> g_local_nodes; //A mapping of unique node identifiers to nodes that are stored in this rank
+vector<int> g_vtxdist; //Equivalent to vtxdist from ParMETIS. If vtxdist[i] <= node_id_j < vtxdist[i+1], then the node with unique id j is in rank i
+                       //Ordered, so use a binary search
+vector<int> g_motif_counts; //Counts of each motif that were found to end in this local graph
+
+  
+
+*/
+      //Test code: create dummy graph
+    //Single rank test
+int totalNodes,nodesPerRank;
+if(mpi_myrank==0){
+   
+    std::fstream myfile(dataFile.c_str(), std::ios_base::in);
+    cout<<"file loc"<<dataFile<<endl;
+    
+    //read in totalnumber of nodes
+    myfile>>totalNodes;
+    
+    MPI_Bcast(&totalNodes,1,MPI_INT,0, MPI_COMM_WORLD);
+    nodesPerRank=totalNodes/mpi_commsize;
+    
+    for(int i = 0; i <= totalNodes; i += nodesPerRank){
+        if(i+nodesPerRank>totalNodes){
+	    g_vtxdist.push_back(totalNodes);
+	}else{
+            g_vtxdist.push_back(i);
+        }
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+    int desRank;
+    int edgeVal[2]; 
+    MPI_Request req = MPI_REQUEST_NULL;
+    MPI_Status status;
+    while (myfile >> edgeVal[0] >> edgeVal[1])
+    {
+	
+        printf("edge %d to %d \n", edgeVal[0] ,edgeVal[1]);
+	
+	desRank=getRankForNode(edgeVal[0]);
+	MPI_Isend(&edgeVal, 2, MPI_INT, desRank, 0, MPI_COMM_WORLD, &req);
+	MPI_Wait(&req, &status);
+    }
+	//indicate that the edges have been read
+    edgeVal[0]=-1;
+    edgeVal[1]=-1;
+    for(int i=1;i<mpi_commsize;i++){
+	MPI_Isend(&edgeVal, 2, MPI_INT, i, 0, MPI_COMM_WORLD, &req);
+	MPI_Wait(&req, &status);
+
+	}
+}else{
+
+
+
+
+//recieve total number of nodes and generate vtxdist
+    MPI_Bcast(&totalNodes,1,MPI_INT,0, MPI_COMM_WORLD);
+
+
+    nodesPerRank=totalNodes/mpi_commsize;
+    
+    for(int i = 0; i <= totalNodes; i += nodesPerRank){
+        if(i+nodesPerRank>totalNodes){
+	    g_vtxdist.push_back(totalNodes);
+	}else{
+            g_vtxdist.push_back(i);
         }
     }
 
-    for(int i = 0; i <= 16; i += nodes_per_rank){
-        g_vtxdist.push_back(i);
-    }
-    //End test code
+    MPI_Barrier(MPI_COMM_WORLD);
+    std::map<int,struct graph_node>::iterator it;
+    int edgeVal[2];
+    edgeVal[0]=0;
+    edgeVal[1]=1; 
+    MPI_Request req = MPI_REQUEST_NULL;
+    MPI_Status status;
+    struct graph_node v;
+    v.role = 0;
+   
+    while(edgeVal[0]!=-1){
+        MPI_Irecv(&edgeVal, 2, MPI_INT, 0, 0, MPI_COMM_WORLD,&req);
+        MPI_Wait(&req, &status);
+        if(edgeVal[0]!=-1){
+            it=g_local_nodes.find(edgeVal[0]);
+	    if(it==g_local_nodes.end()){
+		v.neighbors.clear();
+		v.unique_id = edgeVal[0];
+    		v.neighbors.insert(edgeVal[1]);
+		g_local_nodes[edgeVal[0]]=v;
+	     }else{
+		it->second.neighbors.insert(edgeVal[1]);
+
+		}
+
+
+}
+
+}
+
+
+}
+ 
+
+    
 
     //Test code: create dummy motifs
     //Single rank test
