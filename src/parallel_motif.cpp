@@ -103,6 +103,7 @@ struct node_response { //struct sent over MPI responding to a request for node d
 /* Global Variables ********************************************************/
 /***************************************************************************/
 string dataFile;
+string motifFile;
 //MPI globals
 int mpi_myrank;
 int mpi_commsize;
@@ -149,7 +150,8 @@ void printGraph(){
 //Returns the MPI rank storing the node with the given unique id using a binary search
 int getRankForNode(int id){
     if(g_vtxdist[g_vtxdist.size() - 1] <= id){
-        cerr << "Requested to find a node not in the graph" << endl;
+	
+        cerr << "Requested to find a node not in the graph " << id<<endl;
         CLEAN_EXIT
     }
 
@@ -638,6 +640,7 @@ int main(int argc, char* argv[]){
     }
     int num_local_threads = atoi(argv[3]);
     dataFile=string(argv[1]);
+    motifFile=string(argv[2]);
     //Initialize thread pools
     g_local_threads = thpool_init(num_local_threads);
 
@@ -654,9 +657,9 @@ int main(int argc, char* argv[]){
     m_locked_threads = new pthread_mutex_t;
     rc = pthread_mutex_init(m_locked_threads, NULL);
     CHECK_MUTEX_INIT(rc)
-    cout<<"test read"<<endl;
+    //cout<<"test read"<<endl;
     genTestData();
-    //MPI_Barrier(MPI_COMM_WORLD);
+    MPI_Barrier(MPI_COMM_WORLD);
     sleep(mpi_myrank * 2);
     printStartInfo();
     MPI_Barrier(MPI_COMM_WORLD);
@@ -666,7 +669,7 @@ int main(int argc, char* argv[]){
     int flag;
     int* motif_index = new int;
     for(unsigned int i = 0; i < g_motifs.size(); i++){
-	cout<<"at motif 1"<<endl;
+	//cout<<"at motif 1"<<endl;
         g_ranks_done = 0;
 
         //Create dispatcher thread for the motif
@@ -997,17 +1000,71 @@ if(mpi_myrank==0){
 
 
 }
- 
-
-    
-
-    //Test code: create dummy motifs
-    //Single rank test
-    list<pair<struct motif_node, struct motif_node> > m;
+ list<pair<struct motif_node, struct motif_node> > m;
     struct motif_node a;
     a.role = 0;
     struct motif_node b;
     b.role = 0;
+
+  if(mpi_myrank==0){
+    std::fstream myfile(motifFile.c_str(), std::ios_base::in);
+    cout<<"file loc "<<motifFile<<endl;
+    int edgeVal[2];
+    
+   
+    
+    while (myfile >> edgeVal[0] >> edgeVal[1])
+    {
+
+	if(edgeVal[0]!=-1){
+	//printf("new edge %d %d \n",edgeVal[0],edgeVal[1]);
+	a.motif_node_index = edgeVal[0];
+	b.motif_node_index = edgeVal[1];
+	m.push_back(make_pair(a, b));
+	MPI_Bcast(&edgeVal,2,MPI_INT,0, MPI_COMM_WORLD);
+        
+	}
+	if(edgeVal[0]==-1){
+	g_motifs.push_back(m);
+        m.clear();
+	edgeVal[0]=-1;
+	edgeVal[1]=-1;
+	//printf("end motif\n");
+        MPI_Bcast(&edgeVal,2,MPI_INT,0, MPI_COMM_WORLD);
+	}
+	}
+	//printf("end of file \n");
+	edgeVal[0]=-2;
+	edgeVal[1]=-2;
+        MPI_Bcast(&edgeVal,2,MPI_INT,0, MPI_COMM_WORLD);
+    
+
+
+
+}  else{
+	int edgeVal[2];
+	MPI_Bcast(&edgeVal,2,MPI_INT,0, MPI_COMM_WORLD);
+	while(edgeVal[0]!=-2){
+	if(edgeVal[0]!=-1){
+	printf("new edge %d %d \n",edgeVal[0],edgeVal[1]);
+	a.motif_node_index = edgeVal[0];
+	b.motif_node_index = edgeVal[1];
+	m.push_back(make_pair(a, b));
+	}else{
+	printf("new motif\n");
+	g_motifs.push_back(m);
+        m.clear();
+
+	}
+	MPI_Bcast(&edgeVal,2,MPI_INT,0, MPI_COMM_WORLD);
+	}
+	g_motifs.push_back(m);
+}
+
+/*
+    //Test code: create dummy motifs
+    //Single rank test
+    
     //Motif 0
     a.motif_node_index = 0;
     b.motif_node_index = 1;
@@ -1071,7 +1128,7 @@ if(mpi_myrank==0){
     for(unsigned int i = 0; i < g_motifs.size(); i++){
         g_motif_counts.push_back(0);
     }
-    //End test code
+    //End test code*/
 }
 
 void printStartInfo(){
