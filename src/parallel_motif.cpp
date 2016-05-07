@@ -941,6 +941,7 @@ if(mpi_myrank==0){
 		}
         }    
 	}
+	myfile.close();
 	//indicate that the edges have been read
     edgeVal[0]=-1;
     edgeVal[1]=-1;
@@ -1000,6 +1001,7 @@ if(mpi_myrank==0){
 
 
 }
+//printf("getmotifs\n");
  list<pair<struct motif_node, struct motif_node> > m;
     struct motif_node a;
     a.role = 0;
@@ -1033,12 +1035,14 @@ if(mpi_myrank==0){
         MPI_Bcast(&edgeVal,2,MPI_INT,0, MPI_COMM_WORLD);
 	}
 	}
+	g_motifs.push_back(m);
+        m.clear();
 	//printf("end of file \n");
 	edgeVal[0]=-2;
 	edgeVal[1]=-2;
         MPI_Bcast(&edgeVal,2,MPI_INT,0, MPI_COMM_WORLD);
     
-
+	myfile.close();
 
 
 }  else{
@@ -1060,7 +1064,10 @@ if(mpi_myrank==0){
 	}
 	g_motifs.push_back(m);
 }
-
+printf(" rank %d  has %d motifs to llok for \n",mpi_myrank,g_motifs.size());
+ for(unsigned int i = 0; i < g_motifs.size(); i++){
+        g_motif_counts.push_back(0);
+    }
 /*
     //Test code: create dummy motifs
     //Single rank test

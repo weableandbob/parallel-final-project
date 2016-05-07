@@ -1,2 +1,2 @@
-mpirun -np 5 bin/parallel_motif ~/project/code/parallel-final-project/data.txt ~/project/code/parallel-final-project/motif.txt 5
+mpirun -np 30 bin/parallel_motif ~/project/code/parallel-final-project/sorted_roadnet.txt ~/project/code/parallel-final-project/motif.txt 5
 
