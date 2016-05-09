@@ -133,10 +133,10 @@ map<pthread_t, struct graph_node*> g_shared_buffers; //Used to pass received nod
                                                      //Thread is responsible for freeing memory
 
 //Timing
-unsigned long long g_gen_time_start = 0;
-unsigned long long g_gen_time_end = 0;
-unsigned long long g_comp_time_start = 0;
-unsigned long long g_comp_time_end = 0;
+double g_gen_time_start = 0;
+double g_gen_time_end = 0;
+double g_comp_time_start = 0;
+double g_comp_time_end = 0;
 
 /***************************************************************************/
 /* printGraph **************************************************************/
@@ -651,6 +651,7 @@ int main(int argc, char* argv[]){
     int num_local_threads = atoi(argv[3]);
     dataFile=string(argv[1]);
     motifFile=string(argv[2]);
+
     //Initialize thread pools
     g_local_threads = thpool_init(num_local_threads);
 
@@ -669,19 +670,22 @@ int main(int argc, char* argv[]){
     CHECK_MUTEX_INIT(rc)
 
     if(mpi_myrank == 0){
-        g_gen_time_start = GetTimeBase();
+        cout << "Starting graph distribution" << endl;
+        g_gen_time_start = MPI_Wtime();
     }
     genTestData();
     MPI_Barrier(MPI_COMM_WORLD);
     if(mpi_myrank == 0){
-        g_gen_time_end = GetTimeBase();
+        g_gen_time_end = MPI_Wtime();
+        cout << "Finished graph distribution" << endl;
     }
-    sleep(mpi_myrank * 2);
-    printStartInfo();
-    MPI_Barrier(MPI_COMM_WORLD);
+    //sleep(mpi_myrank * 2);
+    //printStartInfo();
+    //MPI_Barrier(MPI_COMM_WORLD);
 
     if(mpi_myrank == 0){
-        g_comp_time_start = GetTimeBase();
+        cout << "Starting computation" << endl;
+        g_comp_time_start = MPI_Wtime();
     }
 
     //Search for all motifs
@@ -867,7 +871,8 @@ int main(int argc, char* argv[]){
     CLEANUP_TP
 
     if(mpi_myrank == 0){
-        g_comp_time_end = GetTimeBase();
+        g_comp_time_end = MPI_Wtime();
+        cout << "Finished computation" << endl;
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -876,8 +881,8 @@ int main(int argc, char* argv[]){
         for(unsigned int i = 0; i < g_motif_counts.size(); i++){
             cout << "Count for motif " << i << ": " << g_motif_counts[i] << endl;
         }
-        cout << "Graph distribution time took " << (g_gen_time_end - g_gen_time_start) / ((double)CLOCKRATE) << " seconds" << endl;
-        cout << "Computation time took " << (g_comp_time_end - g_comp_time_start) / ((double)CLOCKRATE) << " seconds" << endl;
+        cout << "Graph distribution time took " << (g_gen_time_end - g_gen_time_start) << " seconds" << endl;
+        cout << "Computation time took " << (g_comp_time_end - g_comp_time_start) << " seconds" << endl;
     }    
     return 0;
 }
@@ -889,19 +894,24 @@ int main(int argc, char* argv[]){
 void genTestData(){
     int totalNodes, nodesPerRank;
     if(mpi_myrank==0){
-       
+        //cout << "Opening file stream" << endl;
         std::fstream myfile(dataFile.c_str(), std::ios_base::in);
         //cout<<"file loc"<<dataFile<<endl;
         
         //read in totalnumber of nodes
+        //cout << "Reading total nodes" << endl;
         myfile>>totalNodes;
         
         //Let every rank know total number of nodes
+        //cout << "Broadcasting total nodes" << endl;
         MPI_Bcast(&totalNodes,1,MPI_INT,0, MPI_COMM_WORLD);
         nodesPerRank=totalNodes/mpi_commsize;
 
         //Generate vtxdist
+        //cout << "generating vtxdist" << endl;
+        //cout << "total nodes: " << totalNodes << endl;
         for(int i = 0; i <= totalNodes; i += nodesPerRank){
+            cout << "i: " << i << endl;
             if(i+nodesPerRank>totalNodes){
                 g_vtxdist.push_back(totalNodes);
             }
@@ -909,7 +919,7 @@ void genTestData(){
                 g_vtxdist.push_back(i);
             }
         }
-
+        //cout << "done vtxdist" << endl;
         MPI_Barrier(MPI_COMM_WORLD);
 
         int desRank;
@@ -920,8 +930,11 @@ void genTestData(){
         struct graph_node v;
         v.role = 0;
     
+        int counter = 0;
+
         while (myfile >> edgeVal[0] >> edgeVal[1]){
-        
+            counter += 1;
+            //cout << "On edge " << counter << endl;
             //Add the source node
             desRank = getRankForNode(edgeVal[0]);
             if(desRank != 0){
@@ -958,6 +971,7 @@ void genTestData(){
         }
     
         myfile.close();
+        //cout << "File closed" << endl;
         //indicate that the edges have been read
         edgeVal[0]=-1;
         edgeVal[1]=-1;
