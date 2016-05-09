@@ -911,7 +911,7 @@ void genTestData(){
         //cout << "generating vtxdist" << endl;
         //cout << "total nodes: " << totalNodes << endl;
         for(int i = 0; i <= totalNodes; i += nodesPerRank){
-            cout << "i: " << i << endl;
+            //cout << "i: " << i << endl;
             if(i+nodesPerRank>totalNodes){
                 g_vtxdist.push_back(totalNodes);
             }
