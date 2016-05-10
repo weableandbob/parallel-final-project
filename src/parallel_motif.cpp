@@ -909,18 +909,17 @@ void genTestData(){
 
         //Generate vtxdist
         //cout << "generating vtxdist" << endl;
-        //cout << "total nodes: " << totalNodes << endl;
-        for(int i = 0; i <= totalNodes; i += nodesPerRank){
-            //cout << "i: " << i << endl;
-            if(i+2*nodesPerRank>totalNodes){
-                g_vtxdist.push_back(totalNodes);
+        cout << "total nodes: " << totalNodes << endl;
+        for(int i = 0; i <=mpi_commsize; i += 1){
+            if(i==mpi_commsize){
+                 g_vtxdist.push_back(totalNodes);
             }
             else{
-                g_vtxdist.push_back(i);
+                 g_vtxdist.push_back(i*nodesPerRank);
             }
         }
-        //cout << "done vtxdist" << endl;
-        MPI_Barrier(MPI_COMM_WORLD);
+
+	MPI_Barrier(MPI_COMM_WORLD);
 
         int desRank;
         int edgeVal[2]; 
@@ -987,12 +986,12 @@ void genTestData(){
         nodesPerRank=totalNodes/mpi_commsize;
         
         //Generate vtxdist
-        for(int i = 0; i <= totalNodes; i += nodesPerRank){
-            if(i+2*nodesPerRank>totalNodes){
+        for(int i = 0; i <=mpi_commsize; i += 1){
+            if(i==mpi_commsize){
                 g_vtxdist.push_back(totalNodes);
             }
             else{
-                g_vtxdist.push_back(i);
+                g_vtxdist.push_back(i*nodesPerRank);
             }
         }
     
