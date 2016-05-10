@@ -54,16 +54,6 @@ extern "C" {
     delete d; \
     return NULL;
 
-/*#define COPY_STRUCT_FOR_LOCAL(orig, copy) \
-    copy->motif_index = orig->motif_index; \
-    copy->cur_node = g_local_nodes[next_node]; \
-    copy->desired_motif_node.motif_node_index = it->first; \
-    copy->desired_motif_node.role = copy->cur_node.role; \
-    copy->first_invocation = false; \
-    copy->motif_edges = orig->motif_edges; \
-    copy->visited_nodes = orig->visited_nodes; \
-    copy->motif_to_unique = orig->motif_to_unique;*/
-
 using namespace std;
 
 /***************************************************************************/
@@ -175,7 +165,6 @@ int getRankForNode(int id){
             m -= 1;
         }
         if(g_vtxdist[m] <= id && g_vtxdist[m+1] > id){
-            //cout << "Found rank " << m << " for node " << id << endl;
             return m;
         }
         else if(g_vtxdist[m] <= id){
@@ -354,22 +343,9 @@ bool isValidMotif(dfs_data* data){
 void* threadDFS(void* d){
     struct dfs_data* data = (struct dfs_data*)d;
 
-    //Test code
-    /*cout << "Rank " << mpi_myrank << " DFS run on motif " << data->motif_index << " graph node " << data->cur_node.unique_id;
-    cout << " desired motif node role " << data->desired_motif_node.motif_node_index << " motif edges ";
-    for(list<pair<struct motif_node, struct motif_node> >::iterator i = data->motif_edges.begin();
-            i != data->motif_edges.end(); i++){
-        cout << "([" << i->first.motif_node_index << ", ";
-        cout << i->first.role << "], [" << i->second.motif_node_index;
-        cout << ", " << i->second.role << "]) ";
-    }
-    cout << endl;*/
-    //End test code
-
     //Ensure we're at a valid node for the motif
     //Current node and desired motif node role mismatch
     if(data->cur_node.role != data->desired_motif_node.role){
-        //cout << "mismatched role" << endl;
         END_DFS(data)
     }
     //Current node is unvisited
@@ -379,11 +355,9 @@ void* threadDFS(void* d){
     }
     //Check whether the node's motif id is the same as the desired id
     if(data->motif_to_unique[data->desired_motif_node.motif_node_index] != data->cur_node.unique_id){
-        cout << "mismatch id" << endl;
         END_DFS(data)
     }
 
-    //cout << "valid node" << endl;
     //Now know that the node we're at is valid
     //Check if this was the last node needed to complete motif
     if(data->motif_edges.empty()){
@@ -405,7 +379,6 @@ void* threadDFS(void* d){
         CLEAN_EXIT
     }
 
-    //cout << "valid motif representation" << endl;
     //next_node is a unique node identifier
     int source_unique_node = it->second;
     int rank_with_node;
@@ -415,7 +388,6 @@ void* threadDFS(void* d){
         rank_with_node = getRankForNode(source_unique_node);
         //Node is local, so simply jump
         if(rank_with_node == mpi_myrank){
-            //cout << "jumping" << endl;
             struct dfs_data* input = new dfs_data;
             //Copy data into new struct to pass to new invocation of threadDFS
             input->motif_index = data->motif_index;
@@ -459,7 +431,6 @@ void* threadDFS(void* d){
         }
     }
 
-    //cout << "continues from current node" << endl;
     //Otherwise continues from this node
     pair<struct motif_node, struct motif_node> next_edge = data->motif_edges.front();
     //Pop the edge so we don't keep calling dfs on the same edge
@@ -479,10 +450,8 @@ void* threadDFS(void* d){
         }
         //Determine if the visited node is in this rank or not
         rank_with_node = getRankForNode(dest_unique_node);
-        //cout << "Was given rank " << rank_with_node << " for node " << dest_unique_node << endl;
         //Node is local, so simply call from same thread
         if(rank_with_node == mpi_myrank){
-            //cout << "previously visited" << endl;
             struct dfs_data* input = new dfs_data;
             //Copy data into new struct to pass to new invocation of threadDFS
             input->motif_index = data->motif_index;
@@ -526,7 +495,6 @@ void* threadDFS(void* d){
         }
     }
 
-    //cout << "going to new node" << endl;
     //Know that edge goes to a new node, so iterate over all neighbors
     for(set<int>::iterator neigh = data->cur_node.neighbors.begin();
             neigh != data->cur_node.neighbors.end(); neigh++){
@@ -536,12 +504,9 @@ void* threadDFS(void* d){
         }
 
         //Determine if the neighbor is in this rank or not
-        //cout << "before search" << endl;
         rank_with_node = getRankForNode(*neigh);
-        //cout << "after search" << endl;
         //Node is local, so simply run from current thread
         if(rank_with_node == mpi_myrank){
-            //cout << "new node" << endl;
             struct dfs_data* input = new dfs_data;
             input->motif_index = data->motif_index;
             input->cur_node = g_local_nodes[*neigh];
@@ -583,7 +548,6 @@ void* threadDFS(void* d){
         }
     }
 
-    //cout << "got to end" << endl;
     END_DFS(data)
 }
 
@@ -603,9 +567,6 @@ void* threadDispatcher(void* motif_index){
         data->desired_motif_node = data->motif_edges.front().first;
 
         thpool_add_work(g_local_threads, threadDFS, (void*)data);
-        //Test code
-        //sleep((mpi_myrank+1) * 1);
-        //End test code
     }
     //Wait for all locally dispatched threads to finish
     thpool_wait(g_local_threads);
@@ -679,9 +640,6 @@ int main(int argc, char* argv[]){
         g_gen_time_end = MPI_Wtime();
         cout << "Finished graph distribution" << endl;
     }
-    //sleep(mpi_myrank * 2);
-    //printStartInfo();
-    //MPI_Barrier(MPI_COMM_WORLD);
 
     if(mpi_myrank == 0){
         cout << "Starting computation" << endl;
@@ -693,7 +651,6 @@ int main(int argc, char* argv[]){
     int flag;
     int* motif_index = new int;
     for(unsigned int i = 0; i < g_motifs.size(); i++){
-    //cout<<"at motif 1"<<endl;
         g_ranks_done = 0;
 
         //Create dispatcher thread for the motif
@@ -785,11 +742,6 @@ int main(int argc, char* argv[]){
                     cerr << "Failed to send node response with error code " << rc << endl;
                     CLEAN_EXIT
                 }
-                /*cout << "Sent node " << node_resp.unique_id << " with neighbors ";
-                for(neigh_iter = iter->second.neighbors.begin(); neigh_iter != iter->second.neighbors.end(); neigh_iter++){
-                    cout << *neigh_iter << " ";
-                }
-                cout << endl;*/
             }
             //Received a response to a request for node data
             else if(status.MPI_TAG == MPIT_RESPONSE_NODE){
@@ -803,8 +755,6 @@ int main(int argc, char* argv[]){
                     cerr << "Failed to get number of bytes with error code " << rc << endl;
                     CLEAN_EXIT
                 }
-
-                //cout << "Received num_bytes " << num_bytes << " which should have " << (num_bytes - sizeof(struct node_response)) / sizeof(int) << " neighbors" << endl;
 
                 //Receive data
                 char recv_buffer[num_bytes];
@@ -826,15 +776,8 @@ int main(int argc, char* argv[]){
                 int temp;
                 for(int i = sizeof(node_resp); i < num_bytes; i += sizeof(int)){
                     memcpy(&temp, &recv_buffer[i], sizeof(int));
-                    //cout << "Copied element " << temp << endl;
                     g->neighbors.insert(temp);
                 }
-
-                /*cout << "Received node " << node_resp.unique_id << " with neighbors " ;
-                for(set<int>::iterator iter = g->neighbors.begin(); iter != g->neighbors.end(); iter++){
-                    cout << *iter << " ";
-                }
-                cout << endl;*/
 
                 //Store pointer for thread and unlock thread
                 pthread_mutex_lock(m_shared_buffers);
@@ -854,10 +797,9 @@ int main(int argc, char* argv[]){
                 CLEAN_EXIT
             }
         }
-        //MPI_Barrier(MPI_COMM_WORLD);
+
         //Reduce all counts to rank 0
         int global_sum;
-        //cout << "Rank " << mpi_myrank << " found " << g_motif_counts[i] << " for motif " << i << endl;
         rc = MPI_Reduce(&g_motif_counts[i], &global_sum, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
         if(rc != MPI_SUCCESS){
             cerr << "Failed to reduce with error code " << rc << endl;
@@ -895,22 +837,18 @@ int main(int argc, char* argv[]){
 void genTestData(){
     int totalNodes, nodesPerRank;
     if(mpi_myrank==0){
-        //cout << "Opening file stream" << endl;
         std::fstream myfile(dataFile.c_str(), std::ios_base::in);
-        //cout<<"file loc"<<dataFile<<endl;
         
         //read in totalnumber of nodes
-        //cout << "Reading total nodes" << endl;
         myfile>>totalNodes;
         
         //Let every rank know total number of nodes
-        //cout << "Broadcasting total nodes" << endl;
         MPI_Bcast(&totalNodes,1,MPI_INT,0, MPI_COMM_WORLD);
+
         nodesPerRank=totalNodes/mpi_commsize;
         int rem = totalNodes % mpi_commsize;
         int vtx_val;
         //Generate vtxdist
-        //cout << "total nodes: " << totalNodes << endl;
         for(int i = 0; i <= mpi_commsize; i++){
             if(i == mpi_commsize){
                 g_vtxdist.push_back(totalNodes);
@@ -943,7 +881,6 @@ void genTestData(){
 
         while (myfile >> edgeVal[0] >> edgeVal[1]){
             counter += 1;
-            //cout << "On edge " << counter << endl;
             //Add the source node
             desRank = getRankForNode(edgeVal[0]);
             if(desRank != 0){
@@ -1056,7 +993,6 @@ void genTestData(){
         }
     }
 
-    //printf("getmotifs\n");
     list<pair<struct motif_node, struct motif_node> > m;
     struct motif_node a;
     a.role = 0;
@@ -1065,12 +1001,10 @@ void genTestData(){
     
     if(mpi_myrank==0){
         std::fstream myfile(motifFile.c_str(), std::ios_base::in);
-        //cout<<"file loc "<<motifFile<<endl;
         int edgeVal[2];
             
         while (myfile >> edgeVal[0] >> edgeVal[1]){
             if(edgeVal[0]!=-1){
-                //printf("new edge %d %d \n",edgeVal[0],edgeVal[1]);
                 a.motif_node_index = edgeVal[0];
                 b.motif_node_index = edgeVal[1];
                 m.push_back(make_pair(a, b));
@@ -1081,14 +1015,13 @@ void genTestData(){
                 m.clear();
                 edgeVal[0]=-1;
                 edgeVal[1]=-1;
-                //printf("end motif\n");
                 MPI_Bcast(&edgeVal,2,MPI_INT,0, MPI_COMM_WORLD);
             }
         }
 
         g_motifs.push_back(m);
         m.clear();
-        //printf("end of file \n");
+
         edgeVal[0]=-2;
         edgeVal[1]=-2;
         MPI_Bcast(&edgeVal,2,MPI_INT,0, MPI_COMM_WORLD);
@@ -1101,13 +1034,11 @@ void genTestData(){
 
         while(edgeVal[0]!=-2){
             if(edgeVal[0]!=-1){
-                //printf("new edge %d %d \n",edgeVal[0],edgeVal[1]);
                 a.motif_node_index = edgeVal[0];
                 b.motif_node_index = edgeVal[1];
                 m.push_back(make_pair(a, b));
             }
             else{
-                //printf("new motif\n");
                 g_motifs.push_back(m);
                 m.clear();
             }
@@ -1116,78 +1047,9 @@ void genTestData(){
 
         g_motifs.push_back(m);
     }
-    //printf(" rank %d  has %d motifs to llok for \n",mpi_myrank,g_motifs.size());
-     for(unsigned int i = 0; i < g_motifs.size(); i++){
-        g_motif_counts.push_back(0);
-    }
-/*
-    //Test code: create dummy motifs
-    //Single rank test
-    
-    //Motif 0
-    a.motif_node_index = 0;
-    b.motif_node_index = 1;
-    m.push_back(make_pair(a, b));
-    b.motif_node_index = 2;
-    m.push_back(make_pair(a, b));
-    a.motif_node_index = 1;
-    m.push_back(make_pair(a, b));
-    g_motifs.push_back(m);
-    m.clear();
-    //Motif 1
-    for(int i = 0; i < 4; i++){
-        a.motif_node_index = i;
-        b.motif_node_index = (i + 1) % 4;
-        m.push_back(make_pair(a, b));
-    }
-    g_motifs.push_back(m);
-    m.clear();
-    //Motif 2
-    for(int i = 0; i < 5; i++){
-        a.motif_node_index = i;
-        b.motif_node_index = (i + 1) % 5;
-        m.push_back(make_pair(a, b));
-    }
-    g_motifs.push_back(m);
-    m.clear();
-    //Motif 3
-    a.motif_node_index = 0;
-    b.motif_node_index = 1;
-    m.push_back(make_pair(a, b));
-    a.motif_node_index = 1;
-    b.motif_node_index = 2;
-    m.push_back(make_pair(a, b));
-    b.motif_node_index = 3;
-    m.push_back(make_pair(a, b));
-    g_motifs.push_back(m);
-    m.clear();
-    //Motif 4
-    a.motif_node_index = 0;
-    b.motif_node_index = 1;
-    m.push_back(make_pair(a, b));
-    a.motif_node_index = 1;
-    b.motif_node_index = 2;
-    m.push_back(make_pair(a, b));
-    b.motif_node_index = 3;
-    m.push_back(make_pair(a, b));
-    a.motif_node_index = 2;
-    b.motif_node_index = 4;
-    m.push_back(make_pair(a, b));
-    a.motif_node_index = 3;
-    m.push_back(make_pair(a, b));
-    g_motifs.push_back(m);
-    m.clear();
-    //Motif 5
-    a.motif_node_index = 0;
-    b.motif_node_index = 1;
-    m.push_back(make_pair(a, b));
-    m.push_back(make_pair(b, a));
-    g_motifs.push_back(m);
-
     for(unsigned int i = 0; i < g_motifs.size(); i++){
         g_motif_counts.push_back(0);
     }
-    //End test code*/
 }
 
 void printStartInfo(){
