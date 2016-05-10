@@ -906,20 +906,29 @@ void genTestData(){
         //cout << "Broadcasting total nodes" << endl;
         MPI_Bcast(&totalNodes,1,MPI_INT,0, MPI_COMM_WORLD);
         nodesPerRank=totalNodes/mpi_commsize;
-
+        int rem = totalNodes % mpi_commsize;
+        int vtx_val;
         //Generate vtxdist
-        //cout << "generating vtxdist" << endl;
-        cout << "total nodes: " << totalNodes << endl;
-        for(int i = 0; i <=mpi_commsize; i += 1){
-            if(i==mpi_commsize){
-                 g_vtxdist.push_back(totalNodes);
+        //cout << "total nodes: " << totalNodes << endl;
+        for(int i = 0; i <= mpi_commsize; i++){
+            if(i == mpi_commsize){
+                g_vtxdist.push_back(totalNodes);
             }
             else{
-                 g_vtxdist.push_back(i*nodesPerRank);
+                vtx_val = i * nodesPerRank;
+                if(i != 0){
+                    if(i <= rem){
+                        vtx_val += i;
+                    }
+                    else{
+                        vtx_val += rem;
+                    }
+                }
+                g_vtxdist.push_back(vtx_val);
             }
         }
 
-	MPI_Barrier(MPI_COMM_WORLD);
+        MPI_Barrier(MPI_COMM_WORLD);
 
         int desRank;
         int edgeVal[2]; 
@@ -970,7 +979,7 @@ void genTestData(){
         }
     
         myfile.close();
-        //cout << "File closed" << endl;
+
         //indicate that the edges have been read
         edgeVal[0]=-1;
         edgeVal[1]=-1;
@@ -986,14 +995,26 @@ void genTestData(){
         nodesPerRank=totalNodes/mpi_commsize;
         
         //Generate vtxdist
-        for(int i = 0; i <=mpi_commsize; i += 1){
-            if(i==mpi_commsize){
+        int rem = totalNodes % mpi_commsize;
+        int vtx_val;
+        for(int i = 0; i <= mpi_commsize; i++){
+            if(i == mpi_commsize){
                 g_vtxdist.push_back(totalNodes);
             }
             else{
-                g_vtxdist.push_back(i*nodesPerRank);
+                vtx_val = i * nodesPerRank;
+                if(i != 0){
+                    if(i <= rem){
+                        vtx_val += i;
+                    }
+                    else{
+                        vtx_val += rem;
+                    }
+                }
+                g_vtxdist.push_back(vtx_val);
             }
         }
+
     
         MPI_Barrier(MPI_COMM_WORLD);
 
