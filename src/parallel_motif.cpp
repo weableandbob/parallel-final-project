@@ -912,7 +912,7 @@ void genTestData(){
         //cout << "total nodes: " << totalNodes << endl;
         for(int i = 0; i <= totalNodes; i += nodesPerRank){
             //cout << "i: " << i << endl;
-            if(i+nodesPerRank>totalNodes){
+            if(i+2*nodesPerRank>totalNodes){
                 g_vtxdist.push_back(totalNodes);
             }
             else{
@@ -988,7 +988,7 @@ void genTestData(){
         
         //Generate vtxdist
         for(int i = 0; i <= totalNodes; i += nodesPerRank){
-            if(i+nodesPerRank>totalNodes){
+            if(i+2*nodesPerRank>totalNodes){
                 g_vtxdist.push_back(totalNodes);
             }
             else{
