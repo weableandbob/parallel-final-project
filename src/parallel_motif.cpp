@@ -864,6 +864,7 @@ int main(int argc, char* argv[]){
             CLEAN_EXIT
         }
         if(mpi_myrank == 0){
+            cout << "Finished motif index " << i << endl;
             g_motif_counts[i] = global_sum;
         }
     }
