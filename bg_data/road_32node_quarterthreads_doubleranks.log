@@ -1,0 +1,12 @@
+Starting graph distribution
+Finished graph distribution
+Starting computation
+Finished motif index 0
+Finished motif index 1
+Finished motif index 2
+Finished computation
+Count for motif 0: 724056
+Count for motif 1: 1996768
+Count for motif 2: 50468
+Graph distribution time took 52.5526 seconds
+Computation time took 63.3058 seconds
